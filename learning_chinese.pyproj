@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>aacbff7a-e070-4546-8af4-8731acb8f62d</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>learning_chinese.py</StartupFile>
+    <StartupFile>app.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -21,7 +21,12 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="learning_chinese.py" />
+    <Compile Include="app.py" />
+    <Compile Include="common.py" />
+    <Compile Include="menu.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="pages\" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
