@@ -162,49 +162,70 @@ def show_tone():
 # ===== 音声読み上げ（プレースホルダ） =====
 
 def show_tts():
-    import os, httpx
-    st.header("🔊 中国語（繁體）音声読み上げ")
+    import os, httpx, re
+    import streamlit as st
+
+    st.header("🔊 中国語（繁體）音声読み上げ（診断モード）")
     st.button("⬅ メニューに戻る", on_click=go_menu)
 
     SPEECH_KEY = os.getenv("SPEECH_KEY")
     SPEECH_REGION = os.getenv("SPEECH_REGION")
 
-    st.write("以下のテキストを台湾華語の声で読み上げます。")
-    txt = st.text_area("中国語テキストを入力", "大家好，歡迎來到這個中文學習小工具。", height=120)
+    txt = st.text_area("中国語テキスト（繁/簡）", "大家好，歡迎來到這個中文學習小工具。", height=120)
 
     col1, col2, col3 = st.columns(3)
     with col1:
         voice = st.selectbox("ボイス", [
-            "zh-TW-HsiaoChenNeural",  # 女性（自然）
-            "zh-TW-HsiaoYuNeural",    # 女性（やや若い）
-            "zh-TW-YunJheNeural"      # 男性
+            "zh-TW-HsiaoChenNeural",
+            "zh-TW-HsiaoYuNeural",
+            "zh-TW-YunJheNeural",
         ])
     with col2:
-        rate = st.text_input("速度", "0%", help="例: +10% / -10% / 0%")
+        rate  = st.text_input("速度", "0%", help="例: +10% / -10% / 0%")
     with col3:
         pitch = st.text_input("ピッチ", "0%", help="例: +2st / -2st / 0%")
 
-    if st.button("▶ 読み上げ", type="primary"):
+    st.markdown("**出力フォーマット（まず MP3 48kHz → ダメなら WAV を試す）**")
+    fmt = st.radio(
+        "フォーマット",
+        ["MP3 (48kHz)", "WAV (48kHz)"],
+        index=0,
+        help="iOSは48kHzが安定。MP3で無音ならWAVを試してください。"
+    )
+
+    if st.button("▶ 合成して再生", type="primary"):
         if not (SPEECH_KEY and SPEECH_REGION):
-            st.error("環境変数 SPEECH_KEY / SPEECH_REGION が設定されていません。")
-            st.info("Streamlit Cloud の Secrets か、ローカル環境変数で設定してください。")
+            st.error("SPEECH_KEY / SPEECH_REGION が未設定です（Secrets または環境変数を設定）")
             return
 
+        # Azure エンドポイント
         token_url = f"https://{SPEECH_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
         tts_url   = f"https://{SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
 
-        try:
-            with httpx.Client(timeout=20) as client:
-                # トークンを取得
-                token_resp = client.post(token_url, headers={"Ocp-Apim-Subscription-Key": SPEECH_KEY})
-                token_resp.raise_for_status()
-                token = token_resp.text
+        # 出力フォーマット設定（iOS互換を優先）
+        if fmt == "MP3 (48kHz)":
+            output_format = "audio-48khz-96kbitrate-mono-mp3"
+            mime = "audio/mpeg"   # ← iOS/Android/PCで互換性高い
+            audio_arg = "audio/mpeg"
+        else:
+            output_format = "riff-48khz-16bit-mono-pcm"
+            mime = "audio/wav"
+            audio_arg = "audio/wav"
 
-                # SSML形式でリクエスト
+        try:
+            with httpx.Client(timeout=30) as client:
+                # 1) トークン取得
+                r = client.post(token_url, headers={"Ocp-Apim-Subscription-Key": SPEECH_KEY})
+                r.raise_for_status()
+                token = r.text
+
+                # 2) SSML
+                # 安全のため、不正な制御文字を除去
+                safe_txt = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F]", "", txt)
                 ssml = f"""
 <speak version="1.0" xml:lang="zh-TW">
   <voice name="{voice}">
-    <prosody rate="{rate}" pitch="{pitch}">{txt}</prosody>
+    <prosody rate="{rate}" pitch="{pitch}">{safe_txt}</prosody>
   </voice>
 </speak>
 """.strip()
@@ -212,18 +233,45 @@ def show_tts():
                 headers = {
                     "Authorization": f"Bearer {token}",
                     "Content-Type": "application/ssml+xml",
-                    "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3",
-                    "User-Agent": "streamlit-tts-demo"
+                    "X-Microsoft-OutputFormat": output_format,
+                    "User-Agent": "streamlit-zh-tw-tts",
                 }
-                resp = client.post(tts_url, headers=headers, content=ssml.encode("utf-8"))
-                resp.raise_for_status()
-                audio_bytes = resp.content
 
-            st.success("✅ 音声合成が完了しました！")
-            st.audio(audio_bytes, format="audio/mp3")
+                # 3) 合成
+                t = client.post(tts_url, headers=headers, content=ssml.encode("utf-8"))
+                t.raise_for_status()
+                audio_bytes = t.content
+
+            # ===== 診断表示 =====
+            st.markdown("### 🔍 Diagnostics")
+            st.write(f"- Bytes length: **{len(audio_bytes)}**")
+            st.write(f"- First 16 bytes (hex): `{audio_bytes[:16].hex()}`")
+            st.write(f"- OutputFormat: `{output_format}` / MIME: `{mime}`")
+
+            if len(audio_bytes) == 0:
+                st.error("合成結果が空です。キー/リージョン/テキストを確認してください。")
+                return
+
+            # ===== 再生と保存（MP3/WAV） =====
+            st.markdown("### ▶ 再生")
+            st.audio(audio_bytes, format=audio_arg)
+
+            st.download_button(
+                "音声を保存",
+                data=audio_bytes,
+                file_name="tts.mp3" if mime == "audio/mpeg" else "tts.wav",
+                mime=mime,
+                use_container_width=True,
+            )
+
+            # iOS向けヒント
+            if fmt == "MP3 (48kHz)":
+                st.caption("※ iPhoneで無音なら、上のフォーマットを **WAV (48kHz)** に切り替えて再試行してください。")
+            else:
+                st.caption("※ WAVでも再生できない場合は端末のサイレントスイッチ/音量も確認してください。")
 
         except Exception as e:
-            st.error(f"音声合成に失敗しました: {e}")
+            st.error(f"読み上げに失敗：{e}")
 
 
 # ===== 画面分岐 =====
