@@ -14,13 +14,32 @@ def go_tone():  st.session_state.page = "tone"
 def go_tts():   st.session_state.page  = "tts"
 
 # ===== 単語データ =====
-word_list = [
-    {"japanese": "こんにちは", "chinese": "你好"},
-    {"japanese": "ありがとう", "chinese": "謝謝"},
-    {"japanese": "さようなら", "chinese": "再見"},
-    {"japanese": "水", "chinese": "水"},
-    {"japanese": "ご飯", "chinese": "米飯"},
-]
+import pandas as pd
+import random
+import streamlit as st
+
+# ---- データ読み込み ----
+@st.cache_data
+def load_words():
+    try:
+        df = pd.read_csv("words.csv", encoding="utf-8")
+        # 欠損チェック
+        if not all(col in df.columns for col in ["japanese", "chinese", "pinyin"]):
+            st.error("⚠️ CSVの列名が正しくありません。japanese, chinese, pinyin が必要です。")
+            return []
+        return df.to_dict(orient="records")
+    except FileNotFoundError:
+        st.error("❌ words.csv が見つかりません。app.pyと同じフォルダに置いてください。")
+        return []
+    except Exception as e:
+        st.error(f"❌ CSV読み込みエラー: {e}")
+        return []
+
+word_list = load_words()
+
+if not word_list:
+    st.stop()  # 読み込めなければ中断
+
 
 # ==== 四声テスト用データ ====
 tone_words = [
